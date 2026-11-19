@@ -1,20 +1,22 @@
-"""Read-only access to the gold layer. Each call opens and closes its own connection so the
-dashboard never holds the DuckDB file lock while the pipeline writes."""
+"""Read-only access to the gold layer, on local DuckDB (default) or Snowflake: see backends.py.
+
+Every query here is written in SQL both engines accept, so switching engines is configuration only."""
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
-import duckdb
 import pandas as pd
 
-WAREHOUSE = Path(os.environ.get("AIRBNB_DATA_DIR", Path(__file__).parent.parent / "data")) / "warehouse.duckdb"
+import backends
+
+WAREHOUSE = backends.duckdb_path()
+
+
+def backend_label() -> str:
+    return {"duckdb": "DuckDB (local)", "snowflake": "Snowflake"}[backends.backend_name()]
 
 
 def query(sql: str, params: list | None = None) -> pd.DataFrame:
-    with duckdb.connect(str(WAREHOUSE), read_only=True) as con:
-        df = con.execute(sql, params or []).df()
+    df = backends.run(sql, params)
     # Every warehouse date is a calendar date; show it without a midnight time part.
     for col in df.select_dtypes("datetime").columns:
         if (df[col].dropna().dt.normalize() == df[col].dropna()).all():
@@ -168,6 +170,7 @@ def data_quality() -> pd.DataFrame:
 
 
 def test_history() -> pd.DataFrame:
+    # dbt test results are recorded locally by pipeline.py for either target.
     path = WAREHOUSE.parent / "quality" / "test_history.jsonl"
     if not path.exists():
         return pd.DataFrame()

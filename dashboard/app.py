@@ -57,7 +57,8 @@ latest = snaps[-1]
 st.title("NYC Airbnb Warehouse")
 st.caption(
     f"{len(snaps)} accepted Inside Airbnb snapshots, {snaps[0]:%d %b %Y} to {latest:%d %b %Y}. "
-    "Partial or defective source files are quarantined by data contracts and excluded (see Data quality)."
+    "Partial or defective source files are quarantined by data contracts and excluded (see Data quality). "
+    f"Warehouse: {q.backend_label()}."
 )
 snapshot = st.select_slider("Snapshot", options=snaps, value=latest, format_func=lambda d: f"{d:%d %b %Y}")
 
