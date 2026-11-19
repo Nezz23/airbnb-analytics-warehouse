@@ -76,8 +76,9 @@ def check_sql(contract: Contract, relation: str) -> str:
         checks.append((f"accepted_values:{col}", f"count(*) filter (where {_q(col)} not in ({allowed}))"))
     pk = ", ".join(_q(c) for c in contract.primary_key)
     checks.append(("unique:" + "+".join(contract.primary_key), f"count(*) - count(distinct ({pk}))"))
-    selects = " union all ".join(f"select '{name}' as check_name, {expr} as failures from {relation}" for name, expr in checks)
-    return selects
+    return " union all ".join(
+        f"select '{name}' as check_name, {expr} as failures from {relation}" for name, expr in checks
+    )
 
 
 def evaluate(contract: Contract, results: dict[str, int], previous_rows: int | None) -> list[str]:

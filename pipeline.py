@@ -50,13 +50,18 @@ def record_test_results() -> None:
     with out.open("a") as f:
         for r in results["results"]:
             if r["unique_id"].startswith(("test.", "unit_test.")):
-                f.write(json.dumps({
-                    "run_at": run_at,
-                    "test": r["unique_id"],
-                    "status": r["status"],
-                    "failures": r.get("failures"),
-                    "seconds": round(r["execution_time"], 3),
-                }) + "\n")
+                f.write(
+                    json.dumps(
+                        {
+                            "run_at": run_at,
+                            "test": r["unique_id"],
+                            "status": r["status"],
+                            "failures": r.get("failures"),
+                            "seconds": round(r["execution_time"], 3),
+                        }
+                    )
+                    + "\n"
+                )
 
 
 def main() -> None:

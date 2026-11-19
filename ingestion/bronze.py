@@ -53,14 +53,14 @@ def write_manifest(path: Path, entries: list[dict]) -> None:
 
 def previous_accepted_rows(entries: list[dict], dataset: str, snapshot: str) -> int | None:
     prior = [
-        e for e in entries
-        if e["dataset"] == dataset and e["status"] == "accepted" and e["snapshot_date"] < snapshot
+        e for e in entries if e["dataset"] == dataset and e["status"] == "accepted" and e["snapshot_date"] < snapshot
     ]
     return max(prior, key=lambda e: e["snapshot_date"])["rows"] if prior else None
 
 
-def ingest_file(con, contract: ct.Contract, src: Path, snapshot: str, digest: str,
-                entries: list[dict], bronze: Path) -> dict:
+def ingest_file(
+    con, contract: ct.Contract, src: Path, snapshot: str, digest: str, entries: list[dict], bronze: Path
+) -> dict:
     con.execute(f"create or replace temp view src as select * from read_csv({lit(src)}, all_varchar=true, header=true)")
     columns = [r[0] for r in con.execute("describe src").fetchall()]
     violations = ct.schema_violations(contract, columns)
@@ -131,8 +131,10 @@ def run(raw: Path, bronze: Path, warehouse: Path) -> list[dict]:
             entries = [e for e in entries if e is not known] + [entry]
             write_manifest(manifest_path, entries)  # after each file: progress survives a crash
             changed.append(entry)
-            print(f"{entry['status']:>11}  {dataset:<8} {snapshot}  {entry['rows']:>10,} rows"
-                  + (f"  {entry['violations']}" if entry["violations"] else ""))
+            print(
+                f"{entry['status']:>11}  {dataset:<8} {snapshot}  {entry['rows']:>10,} rows"
+                + (f"  {entry['violations']}" if entry["violations"] else "")
+            )
     if not changed:
         print("bronze: up to date, nothing to ingest")
     publish_views(bronze, warehouse)
