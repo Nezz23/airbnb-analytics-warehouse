@@ -2,6 +2,8 @@
 
     uv run python pipeline.py                 # incremental: only new snapshots do work
     uv run python pipeline.py --full-refresh  # rebuild silver/gold and replay SCD2 from the start
+    DBT_TARGET=snowflake uv run python pipeline.py --skip-bronze
+                                              # dbt only, after bronze was loaded (docs/snowflake.md)
 
 Each test run's results are appended to data/quality/test_history.jsonl for the DQ dashboard.
 """
@@ -67,10 +69,22 @@ def record_test_results() -> None:
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--full-refresh", action="store_true")
+    p.add_argument(
+        "--skip-bronze",
+        action="store_true",
+        help="run dbt only; bronze is already loaded in the target (e.g. Snowflake via deploy/snowflake)",
+    )
     a = p.parse_args()
     started = datetime.now(UTC)
+    target = os.environ.get("DBT_TARGET", "dev")
+    if target == "snowflake" and not a.skip_bronze:
+        sys.exit(
+            "DBT_TARGET=snowflake: local bronze ingestion does not load Snowflake. Run `python -m ingestion.bronze`, "
+            "load it with deploy/snowflake/render_load.py, then rerun with --skip-bronze."
+        )
 
-    bronze.run(DATA / "raw", DATA / "bronze", DATA / "warehouse.duckdb")
+    if not a.skip_bronze:
+        bronze.run(DATA / "raw", DATA / "bronze", DATA / "warehouse.duckdb")
     refresh = ["--full-refresh"] if a.full_refresh else []
     dbt("deps", "--quiet")
     dbt("build", "--select", "silver", "--indirect-selection", "cautious", *refresh)

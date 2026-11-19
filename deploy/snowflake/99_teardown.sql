@@ -1,0 +1,13 @@
+-- DESTRUCTIVE: removes everything 00/01/02 created. Not yet executed. Read before running.
+-- Use when the evaluation is over so nothing (storage included) keeps billing.
+-- Storage note: dropped objects stay in Time Travel (1 day by default) and then Fail-safe (7 days),
+-- billed as storage until they age out.
+
+-- use role accountadmin;
+-- drop database if exists airbnb;
+-- drop warehouse if exists transforming;
+-- drop resource monitor if exists airbnb_monthly_cap;
+-- drop user if exists airbnb_dbt;
+-- drop user if exists airbnb_dashboard;
+-- drop role if exists transformer;
+-- drop role if exists reporter;
