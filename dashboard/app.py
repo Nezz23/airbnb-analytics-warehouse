@@ -180,6 +180,19 @@ with tabs[1]:
                 300,
             )
 
+        rev = cached(q.review_activity)(pick)
+        chart(
+            px.line(
+                rev,
+                x="review_month",
+                y="reviews",
+                color_discrete_sequence=SLOT,
+                title=f"{pick}: reviews per month (demand proxy, full review history)",
+                labels={"review_month": "", "reviews": "reviews"},
+            ),
+            300,
+        )
+
 # ---------------------------------------------------------------- Local Law 18
 with tabs[2]:
     st.markdown(
@@ -413,7 +426,7 @@ with tabs[5]:
         340,
     )
     st.caption(
-        "Beds completeness swings between scrapes (10% on 2026-04-14, 0% on 2026-05-14), "
+        "Beds completeness swings between scrapes (11% on 2026-04-14, 0% on 2026-05-14), "
         "which is why beds and bedrooms are carried but not "
         "tracked in the SCD2 history."
     )

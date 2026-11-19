@@ -87,3 +87,9 @@ models:
 
   - name: mart_data_quality
     description: Contract outcome and field completeness per dataset per snapshot.
+
+  - name: mart_review_activity
+    description: Monthly reviews per neighbourhood (demand proxy), from the deduplicated review log.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [review_month, neighbourhood]}
