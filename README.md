@@ -30,6 +30,7 @@ flowchart LR
 
 ```bash
 uv sync                                   # Python 3.12, dbt-core 1.12, dbt-duckdb, DuckDB 2.0
+uv run python -m ingestion.fetch          # download new Inside Airbnb snapshots (docs/ingestion.md)
 uv run python pipeline.py                 # incremental: bronze -> silver -> SCD2 replay -> gold -> tests
 uv run python pipeline.py --full-refresh  # rebuild silver/gold and replay SCD2 from the first snapshot
 uv run streamlit run dashboard/app.py     # dashboard on localhost
@@ -37,7 +38,11 @@ uv run pytest -q                          # contract unit tests + end-to-end on 
 uv run python benchmarks/run.py           # regenerate docs/benchmarks.md
 ```
 
-Raw files go in `data/raw/<snapshot-date>/{listings,calendar,reviews}.csv.gz`. The `data/` folder is git-ignored.
+Raw files go in `data/raw/<snapshot-date>/{listings,calendar,reviews}.csv.gz`, either placed by hand or
+downloaded and integrity-checked by `ingestion/fetch.py` ([docs/ingestion.md](docs/ingestion.md)). The `data/` folder is git-ignored.
+
+The dashboard reads local DuckDB by default; `AIRBNB_WAREHOUSE_BACKEND=snowflake` points it at Snowflake
+([docs/snowflake.md](docs/snowflake.md)).
 
 ## What happens on a run
 
@@ -115,17 +120,18 @@ flowchart LR
 ## Layout
 
 ```
-ingestion/            contracts/*.yml, contract.py (pure rules), bronze.py (I/O)
+ingestion/            contracts/*.yml, contract.py (pure rules), bronze.py (I/O), fetch.py (downloader)
 transform/            dbt project: models/silver, snapshots, models/gold/{core,marts}, macros, tests
 pipeline.py           orchestration (bronze -> silver -> SCD2 replay -> gold -> tests)
-dashboard/            Streamlit app (app.py) and read-only gold queries (queries.py)
+dashboard/            Streamlit app (app.py), read-only gold queries (queries.py), DuckDB/Snowflake backends.py
+deploy/snowflake/     cost guardrails, setup, bronze load renderer, reconciliation, teardown (not yet run)
 benchmarks/run.py     reproducible timings -> docs/benchmarks.md
 tests/                contract unit tests, synthetic data generator, end-to-end and dashboard tests
 ```
 
 ## Limits and next steps
 
-- Snowflake and AWS are not provisioned. The loading runbook is written ([docs/snowflake.md](docs/snowflake.md)) but has not been run.
+- Snowflake and AWS are not provisioned. Deployment is prepared and checked offline in CI ([docs/snowflake.md](docs/snowflake.md)), but nothing has run against an account.
 - The calendar shows a night as unavailable without saying whether it was booked or blocked, so booking pace is an upper bound on bookings.
 - Late-arriving *older* snapshots load into silver but need `--full-refresh` to slot into the SCD2 history; the reconciliation test flags any mismatch until then.
 

@@ -3,7 +3,7 @@
 select
     cast(dataset as varchar)          as dataset,
     cast(snapshot_date as date)       as snapshot_date,
-    cast(rows as bigint)              as row_count,
+    cast({{ adapter.quote('rows') }} as bigint) as row_count,  -- ROWS is reserved on Snowflake
     cast(status as varchar)           as status,
     violations,
     cast(file_sha256 as varchar)      as file_sha256,

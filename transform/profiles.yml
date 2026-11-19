@@ -10,7 +10,7 @@ airbnb:
       type: duckdb
       path: "{{ env_var('AIRBNB_DATA_DIR') }}/warehouse.duckdb"
       threads: 2
-    # Not yet exercised: needs `pip install dbt-snowflake` and credentials in the environment.
+    # Not yet exercised against a live account: `uv sync --extra snowflake`, then see docs/snowflake.md.
     snowflake:
       type: snowflake
       account: "{{ env_var('SNOWFLAKE_ACCOUNT', '') }}"
@@ -21,4 +21,7 @@ airbnb:
       warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'TRANSFORMING') }}"
       database: "{{ env_var('SNOWFLAKE_DATABASE', 'AIRBNB') }}"
       schema: analytics
-      threads: 8
+      threads: 4
+      query_tag: airbnb_dbt                   # attribute credits to this project in QUERY_HISTORY
+      client_session_keep_alive: false        # never hold a session (or the warehouse) open
+      connect_retries: 2

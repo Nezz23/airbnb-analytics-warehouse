@@ -21,7 +21,8 @@ jobs:
         with:
           enable-cache: true
       - name: Install
-        run: uv sync --locked
+        # --all-extras adds dbt-snowflake so the offline Snowflake parse test runs (no account needed).
+        run: uv sync --locked --all-extras
       - name: Lint
         run: uv run ruff check . && uv run ruff format --check .
       # Contract unit tests + end-to-end pipeline on synthetic snapshots: bronze contracts,

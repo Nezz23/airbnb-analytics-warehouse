@@ -7,3 +7,9 @@ transform/target/
 transform/logs/
 transform/dbt_packages/
 .user.yml
+# Credentials: Snowflake key pairs and env files must never be committed (docs/snowflake.md)
+.env
+.env.*
+*.p8
+*.pem
+*.key
