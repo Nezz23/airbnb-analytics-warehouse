@@ -1,0 +1,30 @@
+# Data contract: Inside Airbnb NYC listings snapshot (listings.csv.gz)
+dataset: listings
+owner: analytics-engineering
+primary_key: [id]
+# Bronze keeps every source column as text; these must be present and parse.
+required_columns:
+  id: bigint
+  last_scraped: date
+  host_id: bigint
+  neighbourhood_cleansed: varchar
+  neighbourhood_group_cleansed: varchar
+  latitude: double
+  longitude: double
+  room_type: varchar
+  accommodates: integer
+  price: money
+  minimum_nights: integer
+  availability_30: integer
+  availability_365: integer
+  number_of_reviews: integer
+  license: varchar
+# Blocking rules only. Row-level gaps (e.g. a few null minimum_nights) are dbt warn-tests in silver.
+not_null: [id, host_id, neighbourhood_cleansed, neighbourhood_group_cleansed, room_type]
+accepted_values:
+  neighbourhood_group_cleansed: [Manhattan, Brooklyn, Queens, Bronx, Staten Island]
+  room_type: [Entire home/apt, Private room, Shared room, Hotel room]
+volume:
+  min_rows: 1000
+  # Reject a snapshot whose row count falls more than this share below the last accepted one.
+  max_drop_vs_previous: 0.5

@@ -1,0 +1,29 @@
+name: airbnb_warehouse
+version: "1.0.0"
+config-version: 2
+profile: airbnb
+
+model-paths: [models]
+snapshot-paths: [snapshots]
+macro-paths: [macros]
+test-paths: [tests]
+
+vars:
+  # Set by the pipeline when replaying one listings snapshot into SCD2; see snapshots/listings_scd2.sql.
+  snapshot_date: null
+
+models:
+  airbnb_warehouse:
+    silver:
+      +schema: silver
+      +materialized: incremental
+    gold:
+      +schema: gold
+      core:
+        +materialized: table
+      marts:
+        +materialized: table
+
+data_tests:
+  airbnb_warehouse:
+    +store_failures: false
