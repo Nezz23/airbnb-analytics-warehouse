@@ -1,11 +1,35 @@
-# NYC Airbnb Warehouse
+# NYC Airbnb Analytics Warehouse
 
-A production-style analytics engineering platform over ten [Inside Airbnb](https://insideairbnb.com/get-the-data/) snapshots of New York City (March to November 2026). It is built with Python, DuckDB and dbt, and the dbt project is written to run on Snowflake as well.
+A local, end-to-end analytics warehouse built on ten [Inside Airbnb](https://insideairbnb.com/get-the-data/)
+snapshots of New York City (March to November 2026). Raw CSV extracts pass through contract-checked
+ingestion, a dbt-modelled Bronze → Silver → Gold medallion architecture with SCD Type 2 history, and a
+Streamlit dashboard. Everything runs on a laptop on DuckDB, at no cost. The dbt project and dashboard
+are prepared for Snowflake, which has not yet been deployed.
 
-The standout feature is the **Local Law 18 radar**. Since 2023, NYC has required hosts who offer stays under 30 nights to register with the city. The radar tracks, snapshot by snapshot, which listings show a registration, which claim an exemption, which moved to 30+ night minimums, and which still accept short stays with neither. It also flags registration numbers reused across listings and hosts.
+## 1. Project overview
+
+Inside Airbnb publishes each city as a series of independent snapshots. Each snapshot describes the market
+on one day, but none of them records what changed between days. This project turns those snapshots into a
+history-aware warehouse that can answer questions no single file can:
+
+- **Regulatory exposure (NYC Local Law 18).** Since 2023, hosts offering stays under 30 nights must register
+  with the city. The warehouse classifies every listing in every snapshot as registered, exempt, 30+ night
+  minimum, or unregistered short-term. It tracks movement between those states and flags registration
+  numbers reused across listings and hosts.
+- **Pricing and availability over time,** compared like-for-like on quoted stay length.
+- **Forward booking pace:** how fast future nights close, from the 365-day availability calendar.
+- **Supply churn:** listings that appear, disappear and return, from the SCD2 history.
+- **Review activity** as a long-run demand proxy (2009 onward, from the cumulative review log).
+
+It was built to demonstrate analytics-engineering practice on real, imperfect data: incremental loads, data
+contracts that quarantine bad files, reproducible slowly-changing dimensions, tested dbt models, and
+portability to a cloud warehouse.
+
+## 2. Architecture
 
 ```mermaid
 flowchart LR
+  src["Inside Airbnb<br/>listings · calendar · reviews"] -->|"ingestion/fetch.py<br/>validated download"| raw
   raw["data/raw/&lt;date&gt;/*.csv.gz<br/>10 snapshots, 1.5 GB"] -->|"ingestion/bronze.py<br/>YAML data contracts"| bronze
   subgraph bronze["Bronze: Parquet per snapshot"]
     b1[listings] --- b2[calendar] --- b3[reviews] --- man[(_manifest.jsonl<br/>accepted / quarantined)]
@@ -20,86 +44,20 @@ flowchart LR
   subgraph gold["Gold: star schema + marts"]
     d1[dim_listing SCD2] --> f1[fct_listing_snapshot]
     d2[dim_host] & d3[dim_neighbourhood] --- f1
-    f1 --> m[10 marts: LL18, pricing,<br/>booking pace, lifecycle, DQ]
+    f1 --> m[9 marts: LL18, pricing, booking pace,<br/>lifecycle, reviews, data quality]
   end
-  gold --> dash[Streamlit dashboard]
-  gold --> bench[benchmarks]
+  gold --> dash[Streamlit dashboard<br/>DuckDB or Snowflake backend]
 ```
 
-## Run it
+| Layer | Storage | Built by | Contents |
+|---|---|---|---|
+| Raw | `data/raw/<date>/*.csv.gz` | `ingestion/fetch.py`, or placed by hand | Source files, unchanged |
+| Bronze | Parquet per dataset and snapshot, exposed as DuckDB views | `ingestion/bronze.py` | Every source column as text, plus lineage columns (`_snapshot_date`, `_source_file`, `_file_sha256`, `_ingested_at`). A manifest records each file's contract result |
+| Silver | DuckDB (`silver` schema) | dbt incremental models, dbt snapshot | Typed, cleaned staging models from accepted snapshots only; `listings_scd2` |
+| Gold | DuckDB (`gold` schema) | dbt tables | `dim_listing` (SCD2), `dim_host`, `dim_neighbourhood`, `fct_listing_snapshot` and 9 marts |
 
-```bash
-uv sync                                   # Python 3.12, dbt-core 1.12, dbt-duckdb, DuckDB 2.0
-uv run python -m ingestion.fetch          # download new Inside Airbnb snapshots (docs/ingestion.md)
-uv run python pipeline.py                 # incremental: bronze -> silver -> SCD2 replay -> gold -> tests
-uv run python pipeline.py --full-refresh  # rebuild silver/gold and replay SCD2 from the first snapshot
-uv run streamlit run dashboard/app.py     # dashboard on localhost
-uv run pytest -q                          # contract unit tests + end-to-end on synthetic data + dashboard smoke test
-uv run python benchmarks/run.py           # regenerate docs/benchmarks.md
-```
-
-Raw files go in `data/raw/<snapshot-date>/{listings,calendar,reviews}.csv.gz`, either placed by hand or
-downloaded and integrity-checked by `ingestion/fetch.py` ([docs/ingestion.md](docs/ingestion.md)). The `data/` folder is git-ignored.
-
-The dashboard reads local DuckDB by default; `AIRBNB_WAREHOUSE_BACKEND=snowflake` points it at Snowflake
-([docs/snowflake.md](docs/snowflake.md)).
-
-## What happens on a run
-
-| Step | What it does | Measured on this data |
-|---|---|---|
-| Bronze | Hashes each raw file and skips any whose file hash and contract hash are both unchanged. Checks the rest against its YAML contract and writes Parquet. Files that fail are **quarantined**: they are kept in bronze but never read downstream. | First load: 4 min 5 s. Rerun with nothing new: skips every file. |
-| Silver | dbt incremental models that load each *accepted* snapshot they don't already hold. They key on snapshot identity rather than a high-water mark, so a late, older snapshot still loads. | ~2 s |
-| SCD2 | `dbt snapshot` is replayed once per pending snapshot date, oldest first. SCD2 boundaries land on the real snapshot date, not the wall-clock time of the run. | ~4 s per snapshot |
-| Gold + tests | Builds the facts, dimensions and marts, then runs every dbt test. Test results are appended to `data/quality/test_history.jsonl`. | ~5 s |
-
-The full pipeline takes **12–13 s** when nothing is new (mostly re-hashing 1.5 GB of raw files) and **52 s** for a full refresh.
-
-## Architecture decisions
-
-- **DuckDB locally, Snowflake-ready.** Everything runs on a laptop at no cost. Two macros, `parse_money` and `array_length`, use `adapter.dispatch` for the places where DuckDB and Snowflake SQL differ, and date arithmetic uses dbt's cross-database macros. Bronze is a schema of views locally and a schema of tables on Snowflake, so the dbt sources are identical. See [docs/snowflake.md](docs/snowflake.md); that path has not been run yet.
-- **Contracts gate at the file, tests guard the model.** Contracts block a file only for problems that make the whole snapshot untrustworthy: a missing column, an unparseable type, a broken primary key, or a volume collapse. Row-level gaps, such as 30 null `minimum_nights` values, are dbt tests at `warn` severity. My first contract mixed the two and rejected 8 good snapshots over 2–8 null values each. Changing a contract re-validates only the files of that dataset.
-- **SCD2 through dbt snapshots, replayed in order.** A dbt snapshot normally records history as of the moment it runs. To rebuild history from archived snapshots, the pipeline passes each snapshot date as a variable, and `snapshot_get_time()` is overridden to return that date. Hard deletes are on, so a listing that disappears is closed on the first snapshot it is missing from, and it opens a new version if it returns. The test `tests/assert_scd2_reconciles_with_silver.sql` proves the history reproduces every silver snapshot exactly.
-- **Price is a measure, not an attribute.** I checked the data: Inside Airbnb's `price` equals the nightly rate of one *quoted stay*, and that stay's check-in date and length (mostly 30 nights, sometimes 1–3) vary per listing. Tracking price in SCD2 produced 191,969 versions, most of them quote noise. Price now lives in the periodic snapshot fact, and comparisons are like-for-like on quote length. The result is **56,657 versions for 41,760 listings**.
-- **Unreliable source fields are carried, not tracked.** `beds` completeness swings from 58% to 11% to 0% to 69% between scrapes. Tracking it would create false SCD2 versions, so `beds` and `bedrooms` are kept as columns but excluded from change tracking.
-- **Data minimisation.** Reviewer names and review text are dropped at bronze. They are personal data and nothing downstream uses them.
-
-## Data contracts caught real problems
-
-| File | Contract result | Why |
-|---|---|---|
-| 2026-06-08 listings / calendar / reviews | quarantined | Partial extract: 4,506 listings, 99.7% of them registered or exempt, against ~30k in neighbouring snapshots (84% volume drop). Without the gate, SCD2 would have "deleted" ~25k listings and revived them 6 days later. |
-| 2026-10-04 reviews | quarantined | 24,244 duplicate review IDs (7,784 IDs, each mapped to conflicting listings, dates or reviewers). The review log is cumulative, so the 2026-11-01 file covers the same reviews. |
-
-26 of 30 files were accepted, and 3,135,649 rows were quarantined.
-
-## Tests
-
-- **dbt:** 50 data tests and 1 unit test. They cover keys, relationships, accepted values and ranges; SCD2 range integrity (a custom generic test); reconciliation of SCD2 against silver; quarantine exclusion; and a unit test of money parsing, license normalisation and Local Law 18 classification.
-- **pytest (13 tests):** contract logic, plus an end-to-end run on synthetic snapshots (`tests/synthetic.py`). The synthetic data includes a partial snapshot that must be quarantined, an attribute change, a listing that disappears and returns, a lower-case registration number, and a listing that drops to a short-term minimum. The second pipeline run in that test must be a no-op. A dashboard smoke test renders every tab.
-- **CI** (`.github/workflows/ci.yml`): ruff lint and format checks, pytest, and dbt docs (lineage) uploaded as a build artifact.
-
-## Findings (verified against the warehouse)
-
-These figures are from the 2026-11-01 snapshot unless noted.
-
-- **80% of NYC listings (24,012 of 29,873) set a 30+ night minimum,** which puts them outside the short-term registration rule. 2,283 show a registration and 2,784 claim an exemption.
-- **Unregistered short-term listings more than doubled, from 367 (Jun 14) to 794 (Nov 1).** 680 of them are in Manhattan, and Midtown alone has 239. This is a *risk signal*: the data shows what hosts display on Airbnb and is not matched against the city's registry.
-- **253 registration numbers appear on more than one listing (564 listings in total).** A registration covers one dwelling unit, so this reuse is worth a closer look. In 4 cases the same number appears across different hosts.
-- **Booking pace:** the share of October 2026 nights still open was 56% at the May 14 snapshot and fell to 26% by October 4.
-- **Supply churn:** the May 14 snapshot dropped 6,448 listings that had been present in April.
-
-## Benchmarks
-
-Measured on an Apple M4 Pro; the full table is in [docs/benchmarks.md](docs/benchmarks.md).
-
-- Median price by borough per snapshot: raw CSV 1.25 s, bronze Parquet 0.009 s, gold mart 0.0007 s.
-- Point-in-time lookup of listing attributes, with the same columns on both sides: bronze 0.061 s against SCD2 0.032 s (2×).
-- Bronze Parquet is 102 MB for listings (152 MB raw gzip) and 17 MB for calendar (240 MB raw gzip).
-
-## Lineage
-
-Generated from the dbt manifest. Run `dbt docs generate` for the interactive version.
+`pipeline.py` runs everything in order: bronze, then silver, then the SCD2 replay one snapshot at a time,
+then gold, then every dbt test. dbt lineage, generated from the manifest:
 
 ```mermaid
 flowchart LR
@@ -117,22 +75,238 @@ flowchart LR
   stg_reviews --> mart_review_activity
 ```
 
-## Layout
+## 3. Tech stack
+
+| Status | Technology | Role |
+|---|---|---|
+| **Working locally** | Python 3.12, [uv](https://docs.astral.sh/uv/) | Runtime and locked dependency management (`uv.lock`) |
+| | DuckDB 2.0 | Local warehouse and bronze query engine |
+| | dbt-core 1.12 + dbt-duckdb, dbt_utils | Silver/gold models, SCD2 snapshot, data and unit tests |
+| | Parquet (zstd) via DuckDB, PyArrow | Bronze storage |
+| | YAML data contracts (`ingestion/contracts/`) | File-level validation and quarantine |
+| | Streamlit, Plotly, pandas | Dashboard |
+| | pytest, ruff | Tests, lint and format |
+| **Configured, not deployed** | Snowflake: dbt-snowflake, snowflake-connector-python (optional `snowflake` extra) | Alternate dbt target and dashboard backend; setup and load scripts in `deploy/snowflake/` |
+| | GitHub Actions (`.github/workflows/ci.yml`) | Workflow is defined but **not currently running** on the repository (see [Testing](#7-testing-and-validation)) |
+| **Optional** | launchd or cron | Local scheduling of snapshot downloads; documented in [docs/ingestion.md](docs/ingestion.md), not installed |
+
+## 4. Data engineering features
+
+**Incremental ingestion.** Bronze hashes each raw file and skips any whose file hash *and* contract hash are
+both unchanged, so a rerun with nothing new does no ingestion work. Changing a contract re-validates only that
+dataset's files. Silver models are dbt incrementals keyed on snapshot identity rather than a high-water mark,
+so a late-arriving older snapshot still loads. The manifest is rewritten atomically after each file, so
+progress survives a crash.
+
+**SCD Type 2 history.** `listings_scd2` is a dbt snapshot (check strategy, hard deletes invalidated), replayed
+one snapshot date at a time, oldest first. `snapshot_get_time()` is overridden so version boundaries land on
+the real snapshot date rather than the time of the run. A listing that disappears is closed on the first
+snapshot it is missing from, and opens a new version if it returns. A custom generic test
+(`scd2_valid_ranges`) checks that versions never overlap. A singular test
+([`assert_scd2_reconciles_with_silver.sql`](transform/tests/assert_scd2_reconciles_with_silver.sql)) proves
+the history reproduces every silver snapshot exactly.
+
+**dbt transformations.** Silver types and conforms the text-only bronze columns: it parses money, percentages
+and booleans, normalises license strings, and rolls the calendar up to monthly grain. Gold is a star schema
+(`fct_listing_snapshot` as a periodic snapshot fact, with listing, host and neighbourhood dimensions) plus
+9 marts. Engine-specific SQL is isolated in macros that use `adapter.dispatch`, and date arithmetic uses
+dbt's cross-database macros.
+
+**Data contracts.** One YAML contract per dataset declares required columns and types, not-null keys,
+accepted values, the primary key, a minimum row count, and a maximum volume drop against the previous accepted
+snapshot. A failing file is **quarantined**: it is kept in bronze for audit but never read downstream.
+Contracts block only problems that make a whole snapshot untrustworthy. Row-level gaps are dbt tests at
+`warn` severity.
+
+**Data quality validation.** dbt data tests cover keys, relationships, accepted values and ranges, plus
+SCD2 integrity, quarantine exclusion and a unit test of the parsing and classification logic. Each run's test
+results are appended to `data/quality/test_history.jsonl`, and the dashboard's Data quality tab reads them
+alongside `mart_data_quality`.
+
+**Automated snapshot downloading.** [`ingestion/fetch.py`](ingestion/fetch.py) (standard library only)
+discovers new snapshots or takes `--date`. It validates the source (https only, a host allowlist, the exact
+path pattern, no future dates). It verifies Content-Length, decompresses every file in full to check gzip
+integrity, and checks the CSV header against the contract. It rejects files byte-identical to ones already
+landed and lands each snapshot all-or-nothing with an atomic rename. Transient failures are retried with
+backoff, a file lock prevents concurrent runs, and every step is logged to a JSONL audit file. Details are in
+[docs/ingestion.md](docs/ingestion.md).
+
+**DuckDB warehouse.** One file (`data/warehouse.duckdb`) holds the silver and gold schemas. Bronze is a
+schema of views over Parquet. The dashboard opens the file read-only for each query, so it never holds the
+lock while the pipeline writes.
+
+**Snowflake preparation.** A `snowflake` profile target, an optional dependency group, setup and
+cost-guardrail SQL, a bronze load-script renderer, post-load reconciliation, and a dashboard backend
+switch. An offline test parses the whole dbt project with the Snowflake adapter and lints the models for
+DuckDB-only SQL and Snowflake reserved words. See [section 9](#9-snowflake-deployment).
+
+## 5. Dataset and scale
+
+Measured on this project's data; sources are this README's earlier revisions and
+[docs/benchmarks.md](docs/benchmarks.md).
+
+| Measure | Value |
+|---|---|
+| Snapshots | 10 (2026-03-16 to 2026-11-01), 3 datasets each = 30 files |
+| Raw size (gzip CSV) | ~1.5 GB: listings 152 MB, calendar 240 MB, reviews 1,130 MB |
+| Bronze size (Parquet, zstd) | listings 102 MB, calendar 17 MB, reviews 147 MB (reviewer names and text dropped) |
+| DuckDB warehouse (silver + gold) | 207 MB |
+| Contract outcome | 26 of 30 files accepted; 3,135,649 rows quarantined |
+| Active listings, latest snapshot | 29,873 |
+| SCD2 history | 56,657 versions for 41,760 listings |
+| Review history | 210 months (May 2009 to Nov 2026) |
+
+**Pipeline timings (local).** First bronze load: 4 min 5 s. Full refresh of silver, SCD2 and gold: 52 s.
+Incremental run with nothing new: 12–13 s, mostly spent re-hashing the raw files.
+
+**Query benchmarks** (12-core ARM laptop, DuckDB 2.0, median of 5 runs; full table in
+[docs/benchmarks.md](docs/benchmarks.md)):
+
+| Question | Raw CSV | Bronze Parquet | Gold |
+|---|---:|---:|---:|
+| Median price by borough per snapshot | 1.25 s | 0.009 s | 0.0007 s (mart) |
+| Unregistered short-term listings per snapshot | 1.25 s | 0.003 s | 0.0006 s (mart) |
+| Point-in-time listing attributes as of 2026-07-01 | n/a | 0.061 s | 0.032 s (SCD2) |
+
+Gold marts are pre-aggregated, so part of their speed-up is work done once at build time.
+
+**What the contracts caught:**
+
+| File | Result | Why |
+|---|---|---|
+| 2026-06-08 listings, calendar, reviews | quarantined | A partial extract: 4,506 listings against ~30k in neighbouring snapshots (an 84% volume drop). Without the gate, SCD2 would have closed ~25k listings and reopened them 6 days later. |
+| 2026-10-04 reviews | quarantined | 24,244 duplicate review IDs, with conflicting listings, dates or reviewers. The cumulative 2026-11-01 file covers the same reviews. |
+
+## 6. Analytics dashboard
+
+`dashboard/app.py` (Streamlit) reads only the gold layer (plus `silver.stg_listings` for map coordinates).
+A snapshot slider applies across tabs, and the header names the active warehouse backend.
+
+| Tab | Business question |
+|---|---|
+| Overview | How large is the market, and what are the median 30-night rate, short-term share and 30-day availability? How are these trending by borough? |
+| Neighbourhoods | Which neighbourhoods are growing, more expensive or more short-term heavy? What is each one's price and review-activity history? |
+| Local Law 18 radar | How is registration status changing, which listings moved between states, where are unregistered short-term listings concentrated (table and map), and which registration numbers are shared? |
+| Booking pace | For each future month, how quickly do open nights close as the stay date approaches? |
+| Listing history | What exactly changed for one listing, version by version (SCD2), alongside its price and availability per snapshot? |
+| Data quality | Which files were accepted or quarantined and why, and how have dbt test results changed over runs? |
+
+Findings from the 2026-11-01 snapshot, verified against the warehouse:
+
+- 80% of listings (24,012 of 29,873) set a 30+ night minimum, which puts them outside the registration rule.
+- Unregistered short-term listings rose from 367 (2026-06-14) to 794 (2026-11-01); 680 of them are in Manhattan.
+  This is a risk signal based on what hosts display, not a match against the city's registry.
+- 253 registration numbers appear on more than one listing (564 listings in total).
+- The share of October 2026 nights still open fell from 56% (May 14 snapshot) to 26% (October 4). This is an
+  upper bound on bookings, because the calendar does not distinguish booked nights from blocked ones.
+
+## 7. Testing and validation
+
+| Check | Result |
+|---|---|
+| `uv run pytest -q` (Python) | **88 passed**: contract logic; an end-to-end pipeline run on synthetic snapshots (quarantine, SCD2 change/close/reopen, LL18 transitions, idempotent second run); dashboard smoke test; DuckDB/Snowflake backend selection; offline Snowflake compatibility; the downloader against a local HTTP server with injected faults |
+| `dbt build` on the real 10-snapshot warehouse | **65 passed, 1 warning, 0 errors** |
+| `ruff check` and `ruff format --check` | Clean |
+| Dashboard on real data | Renders every tab without exceptions |
+
+The single warning is a known, intentional `warn`-severity test: 30 listings have a null `minimum_nights`.
+It is a row-level gap, not a reason to reject the snapshot.
+
+**CI status:** a GitHub Actions workflow is defined in `.github/workflows/ci.yml` (install, lint, pytest,
+dbt docs artifact), but it is **not currently running** on this repository: GitHub has not registered the
+workflow. All results above come from local runs on the merged code. The project does not claim active CI/CD.
+
+## 8. Local setup
+
+Requires [uv](https://docs.astral.sh/uv/getting-started/installation/). uv installs Python 3.12 if needed.
+
+```bash
+uv sync                                   # install locked dependencies
+uv run python -m ingestion.fetch --dry-run  # see which new snapshots are available (downloads nothing)
+uv run python -m ingestion.fetch          # download new snapshots into data/raw/<date>/
+uv run python pipeline.py                 # incremental: bronze -> silver -> SCD2 replay -> gold -> tests
+uv run python pipeline.py --full-refresh  # rebuild silver/gold and replay SCD2 from the first snapshot
+uv run streamlit run dashboard/app.py     # dashboard at http://localhost:8501
+uv run pytest -q                          # full test suite (builds its own synthetic warehouse)
+uv run python benchmarks/run.py           # regenerate docs/benchmarks.md
+```
+
+Raw files can also be placed by hand in `data/raw/<YYYY-MM-DD>/{listings,calendar,reviews}.csv.gz`.
+The Inside Airbnb index lists only the latest NYC snapshot, so earlier dates need `--date YYYY-MM-DD`.
+`data/` is git-ignored.
+
+## 9. Snowflake deployment
+
+**Status: prepared, not deployed.** No Snowflake account has been used, and no objects or costs have been
+created. The step-by-step runbook is [docs/snowflake.md](docs/snowflake.md). In outline:
+
+1. `uv sync --extra snowflake` and set credentials in the environment (key-pair auth; nothing is committed).
+2. Apply cost guardrails and setup: [`deploy/snowflake/00_cost_guardrails.sql`](deploy/snowflake/00_cost_guardrails.sql)
+   (a resource monitor with a 5-credit monthly cap) and [`01_setup.sql`](deploy/snowflake/01_setup.sql)
+   (an XS warehouse with 60 s auto-suspend, schemas, and `TRANSFORMER`/`REPORTER` roles).
+3. Build bronze locally, then load it with the script generated by
+   [`deploy/snowflake/render_load.py`](deploy/snowflake/render_load.py), which is idempotent per snapshot.
+4. Reconcile row counts with [`03_verify_bronze.sql`](deploy/snowflake/03_verify_bronze.sql).
+5. `DBT_TARGET=snowflake uv run python pipeline.py --skip-bronze` runs the same models and tests on Snowflake.
+6. `AIRBNB_WAREHOUSE_BACKEND=snowflake uv run streamlit run dashboard/app.py`.
+
+The readiness audit found and fixed three issues before any deployment: snapshots overwriting each other
+in a single stage prefix, case-sensitive inferred column names, and a column named with the reserved word
+`rows`. `dbt compile` and `dbt build` against Snowflake, and real COPY behavior, can only be verified with an account.
+
+## 10. Engineering decisions
+
+- **Medallion architecture.** Each layer has one job. Bronze preserves the source with full fidelity and
+  lineage, so any downstream result can be rebuilt or audited. Silver is the single place types and
+  cleaning rules live. Gold is shaped for questions. Quarantined data stays inspectable in bronze without
+  ever reaching consumers.
+- **Incremental processing.** Snapshots arrive about monthly, and reprocessing 1.5 GB to add one is wasteful.
+  Keying increments on file hash and snapshot identity, rather than timestamps, makes reruns no-ops and
+  handles late or re-delivered files correctly.
+- **SCD Type 2 via replayed dbt snapshots.** Point-in-time questions ("what did this listing look like in
+  July?") need versioned attributes. Replaying each archived snapshot with its own date as the effective
+  time produces the history that would have been recorded had the warehouse existed all along. A
+  reconciliation test makes the replay verifiable.
+- **Price as a measure, not an SCD2 attribute.** Inside Airbnb's `price` is the nightly rate of one quoted
+  stay, whose dates and length vary per listing. Tracking it in SCD2 produced 191,969 versions, mostly quote
+  noise. Price now lives in the snapshot fact and is compared on matching quote lengths. Fields that the
+  source fills inconsistently between scrapes (`beds`, `bedrooms`) are carried but not tracked.
+- **Data contracts at the file boundary.** A partial or corrupt extract should stop at the door, not
+  silently close 25,000 SCD2 records. Contracts are deliberately narrow: an early version that also blocked
+  on row-level nulls rejected 8 good snapshots, so row-level rules moved to dbt warn-tests.
+- **dbt.** It provides dependency-ordered builds, incremental materialisations, snapshots, tests and lineage
+  documentation from SQL under version control. Its adapter abstraction is what lets the same project target
+  DuckDB today and Snowflake later.
+- **Data minimisation.** Reviewer names and review text are dropped at bronze; nothing downstream needs them.
+
+## 11. Project status
+
+| Area | Status |
+|---|---|
+| Bronze/Silver/Gold pipeline, SCD2, data contracts, dbt tests | Complete, running locally on real data |
+| Automated snapshot download | Complete; run manually (scheduling documented, not installed) |
+| Dashboard (DuckDB backend) | Complete |
+| Snowflake: dbt target, setup, load and reconciliation scripts, dashboard backend | Prepared and checked offline; **not deployed** |
+| GitHub Actions CI | Workflow defined; **not running** |
+
+## 12. Future improvements
+
+- Deploy to a Snowflake trial account behind the resource monitor, then run the reconciliation and full dbt test suite there.
+- Get CI running on pull requests and protect `main` with required checks.
+- Handle a late-arriving *older* snapshot in SCD2 without a full refresh (today the reconciliation test flags it until `--full-refresh` runs).
+- Detect schema drift in Snowflake landing tables (they are templated from the oldest snapshot).
+
+## Repository layout
 
 ```
-ingestion/            contracts/*.yml, contract.py (pure rules), bronze.py (I/O), fetch.py (downloader)
-transform/            dbt project: models/silver, snapshots, models/gold/{core,marts}, macros, tests
-pipeline.py           orchestration (bronze -> silver -> SCD2 replay -> gold -> tests)
-dashboard/            Streamlit app (app.py), read-only gold queries (queries.py), DuckDB/Snowflake backends.py
-deploy/snowflake/     cost guardrails, setup, bronze load renderer, reconciliation, teardown (not yet run)
-benchmarks/run.py     reproducible timings -> docs/benchmarks.md
-tests/                contract unit tests, synthetic data generator, end-to-end and dashboard tests
+ingestion/          contracts/*.yml, contract.py (rules), bronze.py (ingestion), fetch.py (downloader)
+transform/          dbt project: models/silver, snapshots, models/gold/{core,marts}, macros, tests
+pipeline.py         orchestration: bronze -> silver -> SCD2 replay -> gold -> tests
+dashboard/          app.py (Streamlit), queries.py (gold queries), backends.py (DuckDB / Snowflake)
+deploy/snowflake/   cost guardrails, setup, bronze load renderer, reconciliation, teardown (not yet run)
+benchmarks/         run.py -> docs/benchmarks.md
+docs/               benchmarks.md, ingestion.md, snowflake.md
+tests/              pytest suite and synthetic data generator
 ```
-
-## Limits and next steps
-
-- Snowflake and AWS are not provisioned. Deployment is prepared and checked offline in CI ([docs/snowflake.md](docs/snowflake.md)), but nothing has run against an account.
-- The calendar shows a night as unavailable without saying whether it was booked or blocked, so booking pace is an upper bound on bookings.
-- Late-arriving *older* snapshots load into silver but need `--full-refresh` to slot into the SCD2 history; the reconciliation test flags any mismatch until then.
 
 Data: Inside Airbnb, licensed under CC BY 4.0.
