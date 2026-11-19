@@ -1,0 +1,68 @@
+{
+  "run_at": "2026-11-19T21:01:45+00:00",
+  "machine": {
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "cpu": "Apple M4 Pro",
+    "cores": 12,
+    "duckdb": "2.0.0"
+  },
+  "queries": [
+    {
+      "question": "Median price by borough per snapshot",
+      "layer": "raw_csv",
+      "median_s": 1.2456612498499453,
+      "min_s": 1.2379805413074791
+    },
+    {
+      "question": "Median price by borough per snapshot",
+      "layer": "bronze_parquet",
+      "median_s": 0.008558083325624466,
+      "min_s": 0.007827292196452618
+    },
+    {
+      "question": "Median price by borough per snapshot",
+      "layer": "gold_mart",
+      "median_s": 0.0007230830378830433,
+      "min_s": 0.0006526666693389416
+    },
+    {
+      "question": "Unregistered short-term listings per snapshot (LL18)",
+      "layer": "raw_csv",
+      "median_s": 1.2452227086760104,
+      "min_s": 1.2325993753038347
+    },
+    {
+      "question": "Unregistered short-term listings per snapshot (LL18)",
+      "layer": "bronze_parquet",
+      "median_s": 0.0026295422576367855,
+      "min_s": 0.0025959578342735767
+    },
+    {
+      "question": "Unregistered short-term listings per snapshot (LL18)",
+      "layer": "gold_mart",
+      "median_s": 0.0006065000779926777,
+      "min_s": 0.0005475827492773533
+    },
+    {
+      "question": "Point-in-time: every listing's attributes as of 2026-07-01",
+      "layer": "bronze_parquet",
+      "median_s": 0.06080704228952527,
+      "min_s": 0.060546541120857
+    },
+    {
+      "question": "Point-in-time: every listing's attributes as of 2026-07-01",
+      "layer": "gold_scd2",
+      "median_s": 0.031814499758183956,
+      "min_s": 0.03153229225426912
+    }
+  ],
+  "storage_bytes": {
+    "raw_listings": 152466851,
+    "raw_calendar": 239659550,
+    "raw_reviews": 1130257741,
+    "bronze_listings": 102471468,
+    "bronze_calendar": 17082815,
+    "bronze_reviews": 147033792,
+    "warehouse_duckdb": 207106048
+  }
+}
