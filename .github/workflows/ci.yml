@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DBT_SEND_ANONYMOUS_USAGE_STATS: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check . && uv run ruff format --check .
+      # Contract unit tests + end-to-end pipeline on synthetic snapshots: bronze contracts,
+      # quarantine, dbt silver/gold, SCD2 replay, every dbt data and unit test.
+      - name: Test
+        run: uv run pytest -q
+      - name: Build dbt docs (lineage)
+        env:
+          AIRBNB_DATA_DIR: ${{ runner.temp }}/docs-data
+        run: |
+          uv run python tests/synthetic.py "$AIRBNB_DATA_DIR/raw"
+          uv run python pipeline.py
+          uv run dbt docs generate --project-dir transform --profiles-dir transform
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dbt-docs
+          path: |
+            transform/target/index.html
+            transform/target/manifest.json
+            transform/target/catalog.json
