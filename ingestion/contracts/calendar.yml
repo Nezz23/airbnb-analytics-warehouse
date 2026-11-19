@@ -1,0 +1,16 @@
+# Data contract: forward 365-day availability calendar (calendar.csv.gz)
+dataset: calendar
+owner: analytics-engineering
+primary_key: [listing_id, date]
+required_columns:
+  listing_id: bigint
+  date: date
+  available: boolean
+  minimum_nights: integer
+  maximum_nights: integer
+not_null: [listing_id, date, available]
+accepted_values:
+  available: [t, f]
+volume:
+  min_rows: 100000
+  max_drop_vs_previous: 0.5

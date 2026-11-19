@@ -1,0 +1,89 @@
+version: 2
+
+models:
+  - name: dim_listing
+    description: >
+      SCD Type 2 listing dimension. A version is valid for snapshot dates in [valid_from, valid_to);
+      valid_to is null while the version is current. A listing that disappears is closed on the
+      first snapshot it is missing from; if it returns, it opens a new version.
+    data_tests:
+      - scd2_valid_ranges: {arguments: {key: listing_id}}
+    columns:
+      - name: listing_sk
+        data_tests: [unique, not_null]
+      - name: listing_id
+        data_tests: [not_null]
+      - name: valid_from
+        data_tests: [not_null]
+
+  - name: dim_neighbourhood
+    columns:
+      - name: neighbourhood
+        data_tests: [unique, not_null]
+      - name: neighbourhood_sk
+        data_tests: [unique]
+
+  - name: dim_host
+    columns:
+      - name: host_id
+        data_tests: [unique, not_null]
+
+  - name: fct_listing_snapshot
+    description: Periodic snapshot fact, one row per listing per accepted snapshot, joined point-in-time to dim_listing.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [listing_id, snapshot_date]}
+      - dbt_utils.equal_rowcount:
+          arguments: {compare_model: ref('stg_listings')}
+    columns:
+      - name: listing_sk
+        description: Every fact row must find exactly the SCD2 version valid on its snapshot date.
+        data_tests:
+          - not_null
+          - relationships: {arguments: {to: ref('dim_listing'), field: listing_sk}}
+      - name: neighbourhood
+        data_tests:
+          - relationships: {arguments: {to: ref('dim_neighbourhood'), field: neighbourhood}}
+      - name: host_id
+        data_tests:
+          - relationships: {arguments: {to: ref('dim_host'), field: host_id}}
+
+  - name: mart_neighbourhood_snapshot
+    description: Supply, price and availability per neighbourhood per snapshot.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [snapshot_date, neighbourhood]}
+
+  - name: mart_price_changes
+    description: Each listing price change between contiguous SCD2 versions.
+    columns:
+      - name: change_pct
+        data_tests: [not_null]
+
+  - name: mart_listing_lifecycle
+    description: New, relisted and delisted listings per snapshot.
+    columns:
+      - name: snapshot_date
+        data_tests: [unique]
+
+  - name: mart_ll18_status
+    description: Local Law 18 status mix per borough per snapshot.
+
+  - name: mart_ll18_transitions
+    description: Listing movements between Local Law 18 statuses across consecutive snapshots.
+    data_tests:
+      - dbt_utils.expression_is_true:
+          arguments: {expression: "not (from_status = 'not_listed' and to_status = 'not_listed')"}
+
+  - name: mart_shared_registrations
+    description: Registration numbers displayed on more than one listing in the same snapshot.
+
+  - name: mart_booking_pace
+    description: Open-night share of each future stay month, as seen from each snapshot.
+    columns:
+      - name: open_night_rate
+        data_tests:
+          - dbt_utils.accepted_range: {arguments: {min_value: 0, max_value: 1}}
+
+  - name: mart_data_quality
+    description: Contract outcome and field completeness per dataset per snapshot.

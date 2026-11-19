@@ -1,0 +1,8 @@
+version: 2
+
+snapshots:
+  - name: listings_scd2
+    description: SCD Type 2 listing history replayed from accepted snapshots.
+    columns:
+      - name: dbt_scd_id
+        data_tests: [unique, not_null]

@@ -1,0 +1,21 @@
+version: 2
+
+sources:
+  - name: bronze
+    description: >
+      Contract-checked Parquet written by ingestion/bronze.py, one partition per snapshot.
+      Locally the bronze schema is views over the Parquet files; on Snowflake it is tables loaded from a stage.
+    schema: bronze
+    tables:
+      - name: listings
+        description: Inside Airbnb NYC listings snapshot, every source column as text.
+      - name: calendar
+        description: Forward 365-night availability per listing, as published at each snapshot.
+      - name: reviews
+        description: Cumulative review log (reviewer names and comment text are dropped at ingestion).
+      - name: manifest
+        description: One row per ingested file with its contract result (accepted / quarantined).
+        loaded_at_field: ingested_at
+        freshness:
+          warn_after: {count: 40, period: day}
+          error_after: {count: 70, period: day}

@@ -1,0 +1,16 @@
+# Data contract: cumulative review log (reviews.csv.gz).
+# reviewer_name and comments are dropped at ingestion (personal data, unused downstream).
+dataset: reviews
+owner: analytics-engineering
+primary_key: [id]
+required_columns:
+  listing_id: bigint
+  id: bigint
+  date: date
+  reviewer_id: bigint
+drop_columns: [reviewer_name, comments]
+not_null: [listing_id, id, date]
+accepted_values: {}
+volume:
+  min_rows: 10000
+  max_drop_vs_previous: 0.5

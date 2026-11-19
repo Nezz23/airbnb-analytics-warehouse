@@ -1,0 +1,24 @@
+# Project-local profiles: run dbt with --profiles-dir transform (never touches ~/.dbt).
+airbnb:
+  target: "{{ env_var('DBT_TARGET', 'dev') }}"
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('AIRBNB_DATA_DIR', '../data') }}/warehouse.duckdb"
+      threads: 4
+    ci:
+      type: duckdb
+      path: "{{ env_var('AIRBNB_DATA_DIR') }}/warehouse.duckdb"
+      threads: 2
+    # Not yet exercised: needs `pip install dbt-snowflake` and credentials in the environment.
+    snowflake:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT', '') }}"
+      user: "{{ env_var('SNOWFLAKE_USER', '') }}"
+      authenticator: snowflake_jwt
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH', '') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'TRANSFORMER') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'TRANSFORMING') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', 'AIRBNB') }}"
+      schema: analytics
+      threads: 8
