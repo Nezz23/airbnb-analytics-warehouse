@@ -67,6 +67,13 @@ def neighbourhood_history(neighbourhood: str) -> pd.DataFrame:
     )
 
 
+def review_activity(neighbourhood: str) -> pd.DataFrame:
+    return query(
+        "select review_month, reviews from gold.mart_review_activity where neighbourhood = ? order by 1",
+        [neighbourhood],
+    )
+
+
 def ll18_status() -> pd.DataFrame:
     return query(
         "select snapshot_date, ll18_status, sum(listings) as listings "

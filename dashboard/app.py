@@ -5,11 +5,18 @@ uv run streamlit run dashboard/app.py
 
 from __future__ import annotations
 
+import importlib
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
 import queries as q
+
+# Streamlit re-runs this script on every interaction but keeps imported modules for the server's
+# lifetime, and its file watcher only evicts them for edits a connected session observed. Reloading
+# keeps queries.py in step with this file (st.cache_data still hits: it keys on function source).
+q = importlib.reload(q)
 
 # Categorical slots in fixed order (validated palette); color follows the entity everywhere.
 SLOT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
@@ -179,6 +186,19 @@ with tabs[1]:
                 ).update_yaxes(tickformat=".0%"),
                 300,
             )
+
+        rev = cached(q.review_activity)(pick)
+        chart(
+            px.line(
+                rev,
+                x="review_month",
+                y="reviews",
+                color_discrete_sequence=SLOT,
+                title=f"{pick}: reviews per month (demand proxy, full review history)",
+                labels={"review_month": "", "reviews": "reviews"},
+            ),
+            300,
+        )
 
 # ---------------------------------------------------------------- Local Law 18
 with tabs[2]:
@@ -413,7 +433,7 @@ with tabs[5]:
         340,
     )
     st.caption(
-        "Beds completeness swings between scrapes (10% on 2026-04-14, 0% on 2026-05-14), "
+        "Beds completeness swings between scrapes (11% on 2026-04-14, 0% on 2026-05-14), "
         "which is why beds and bedrooms are carried but not "
         "tracked in the SCD2 history."
     )
