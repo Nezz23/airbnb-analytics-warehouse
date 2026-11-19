@@ -5,11 +5,18 @@ uv run streamlit run dashboard/app.py
 
 from __future__ import annotations
 
+import importlib
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
 import queries as q
+
+# Streamlit re-runs this script on every interaction but keeps imported modules for the server's
+# lifetime, and its file watcher only evicts them for edits a connected session observed. Reloading
+# keeps queries.py in step with this file (st.cache_data still hits: it keys on function source).
+q = importlib.reload(q)
 
 # Categorical slots in fixed order (validated palette); color follows the entity everywhere.
 SLOT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
