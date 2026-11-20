@@ -9,5 +9,5 @@
 -- drop resource monitor if exists airbnb_monthly_cap;
 -- drop user if exists airbnb_dbt;
 -- drop user if exists airbnb_dashboard;
--- drop role if exists transformer;
--- drop role if exists reporter;
+-- drop role if exists airbnb_transformer;
+-- drop role if exists airbnb_reporter;

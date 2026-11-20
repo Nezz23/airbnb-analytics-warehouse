@@ -70,7 +70,7 @@ def test_snowflake_settings_are_cost_conscious_and_read_only_by_default(monkeypa
     for var in backends.SNOWFLAKE_REQUIRED:
         monkeypatch.setenv(var, "x")
     s = backends.snowflake_settings()
-    assert s["role"] == "REPORTER"
+    assert s["role"] == "AIRBNB_REPORTER"
     assert s["client_session_keep_alive"] is False
     assert s["session_parameters"]["STATEMENT_TIMEOUT_IN_SECONDS"] <= 60
     assert s["session_parameters"]["QUERY_TAG"] == "airbnb_dashboard"

@@ -4,7 +4,7 @@ A local, end-to-end analytics warehouse built on ten [Inside Airbnb](https://ins
 snapshots of New York City (March to November 2026). Raw CSV extracts pass through contract-checked
 ingestion, a dbt-modelled Bronze → Silver → Gold medallion architecture with SCD Type 2 history, and a
 Streamlit dashboard. Everything runs on a laptop on DuckDB, at no cost. The dbt project and dashboard
-are prepared for Snowflake, which has not yet been deployed.
+are also deployed to Snowflake, where the same models and tests produce identical results.
 
 ## 1. Project overview
 
@@ -86,7 +86,7 @@ flowchart LR
 | | YAML data contracts (`ingestion/contracts/`) | File-level validation and quarantine |
 | | Streamlit, Plotly, pandas | Dashboard |
 | | pytest, ruff | Tests, lint and format |
-| **Configured, not deployed** | Snowflake: dbt-snowflake, snowflake-connector-python (optional `snowflake` extra) | Alternate dbt target and dashboard backend; setup and load scripts in `deploy/snowflake/` |
+| **Deployed (manual runs)** | Snowflake: dbt-snowflake, snowflake-connector-python (optional `snowflake` extra) | Alternate dbt target and dashboard backend; setup and load scripts in `deploy/snowflake/` |
 | | GitHub Actions (`.github/workflows/ci.yml`) | Workflow is defined but **not currently running** on the repository (see [Testing](#7-testing-and-validation)) |
 | **Optional** | launchd or cron | Local scheduling of snapshot downloads; documented in [docs/ingestion.md](docs/ingestion.md), not installed |
 
@@ -204,7 +204,7 @@ Findings from the 2026-11-01 snapshot, verified against the warehouse:
 
 | Check | Result |
 |---|---|
-| `uv run pytest -q` (Python) | **88 passed**: contract logic; an end-to-end pipeline run on synthetic snapshots (quarantine, SCD2 change/close/reopen, LL18 transitions, idempotent second run); dashboard smoke test; DuckDB/Snowflake backend selection; offline Snowflake compatibility; the downloader against a local HTTP server with injected faults |
+| `uv run pytest -q` (Python) | **87 passed, 1 skipped** (the Snowflake compatibility check needs `uv sync --extra snowflake`; with it, 88 pass): contract logic; an end-to-end pipeline run on synthetic snapshots (quarantine, SCD2 change/close/reopen, LL18 transitions, idempotent second run); dashboard smoke test; DuckDB/Snowflake backend selection; offline Snowflake compatibility; the downloader against a local HTTP server with injected faults |
 | `dbt build` on the real 10-snapshot warehouse | **65 passed, 1 warning, 0 errors** |
 | `ruff check` and `ruff format --check` | Clean |
 | Dashboard on real data | Renders every tab without exceptions |
@@ -212,9 +212,10 @@ Findings from the 2026-11-01 snapshot, verified against the warehouse:
 The single warning is a known, intentional `warn`-severity test: 30 listings have a null `minimum_nights`.
 It is a row-level gap, not a reason to reject the snapshot.
 
-**CI status:** a GitHub Actions workflow is defined in `.github/workflows/ci.yml` (install, lint, pytest,
-dbt docs artifact), but it is **not currently running** on this repository: GitHub has not registered the
-workflow. All results above come from local runs on the merged code. The project does not claim active CI/CD.
+**CI status:** GitHub Actions (`.github/workflows/ci.yml`: install, lint, pytest, dbt docs artifact) runs on
+every push to `main` and on pull requests. It was registered when the workflow first reached `main`
+(2026-11-19), so the first six pull requests were merged on local results; every push to `main` since has run
+CI, and the latest run passed all steps. There is no deployment (CD) step: Snowflake loads and dbt runs are started manually (section 9).
 
 ## 8. Local setup
 
@@ -237,22 +238,33 @@ The Inside Airbnb index lists only the latest NYC snapshot, so earlier dates nee
 
 ## 9. Snowflake deployment
 
-**Status: prepared, not deployed.** No Snowflake account has been used, and no objects or costs have been
-created. The step-by-step runbook is [docs/snowflake.md](docs/snowflake.md). In outline:
+**Status: deployed and validated (2026-11-20)** on a Snowflake trial account, XS warehouse behind a 5-credit
+monthly resource monitor. Results:
+
+| Check | Result |
+|---|---|
+| Bronze load (`03_verify_bronze.sql`) | 30 files; 0 row-count mismatches against the local manifest (listings 284,472; calendar 104,156,800; reviews 9,399,338 rows) |
+| `dbt build` on Snowflake | All models, SCD2 replay of 9 accepted snapshots, and tests pass; the same single `warn` as locally |
+| Parity with local DuckDB | 24 of 24 checks identical: row counts of every silver and gold table, SCD2 versions (56,657), active listings (29,873), unregistered short-term (794) |
+| Dashboard (`AIRBNB_WAREHOUSE_BACKEND=snowflake`, read-only role) | Every tab renders; same figures as on DuckDB |
+
+The step-by-step runbook is [docs/snowflake.md](docs/snowflake.md). In outline:
 
 1. `uv sync --extra snowflake` and set credentials in the environment (key-pair auth; nothing is committed).
 2. Apply cost guardrails and setup: [`deploy/snowflake/00_cost_guardrails.sql`](deploy/snowflake/00_cost_guardrails.sql)
    (a resource monitor with a 5-credit monthly cap) and [`01_setup.sql`](deploy/snowflake/01_setup.sql)
-   (an XS warehouse with 60 s auto-suspend, schemas, and `TRANSFORMER`/`REPORTER` roles).
+   (an XS warehouse with 60 s auto-suspend, schemas, and `AIRBNB_TRANSFORMER`/`AIRBNB_REPORTER` roles).
 3. Build bronze locally, then load it with the script generated by
    [`deploy/snowflake/render_load.py`](deploy/snowflake/render_load.py), which is idempotent per snapshot.
 4. Reconcile row counts with [`03_verify_bronze.sql`](deploy/snowflake/03_verify_bronze.sql).
 5. `DBT_TARGET=snowflake uv run python pipeline.py --skip-bronze` runs the same models and tests on Snowflake.
 6. `AIRBNB_WAREHOUSE_BACKEND=snowflake uv run streamlit run dashboard/app.py`.
 
-The readiness audit found and fixed three issues before any deployment: snapshots overwriting each other
+The offline readiness audit found and fixed three issues before deployment: snapshots overwriting each other
 in a single stage prefix, case-sensitive inferred column names, and a column named with the reserved word
-`rows`. `dbt compile` and `dbt build` against Snowflake, and real COPY behavior, can only be verified with an account.
+`rows`. The first real build found a fourth: a named `WINDOW` clause in `mart_price_changes`, which Snowflake
+does not support. It is now written inline, and the offline compatibility test checks for it. Roles are
+project-scoped (`AIRBNB_TRANSFORMER`, `AIRBNB_REPORTER`) so the project can share an account with others.
 
 ## 10. Engineering decisions
 
@@ -286,13 +298,13 @@ in a single stage prefix, case-sensitive inferred column names, and a column nam
 | Bronze/Silver/Gold pipeline, SCD2, data contracts, dbt tests | Complete, running locally on real data |
 | Automated snapshot download | Complete; run manually (scheduling documented, not installed) |
 | Dashboard (DuckDB backend) | Complete |
-| Snowflake: dbt target, setup, load and reconciliation scripts, dashboard backend | Prepared and checked offline; **not deployed** |
-| GitHub Actions CI | Workflow defined; **not running** |
+| Snowflake: dbt target, setup, load and reconciliation scripts, dashboard backend | **Deployed and validated**: reconciliation clean, dbt tests pass, 24/24 parity with DuckDB |
+| GitHub Actions CI | Running on pushes to `main` (latest: passing); pull-request runs apply from the next PR on |
 
 ## 12. Future improvements
 
-- Deploy to a Snowflake trial account behind the resource monitor, then run the reconciliation and full dbt test suite there.
-- Get CI running on pull requests and protect `main` with required checks.
+- Automate the Snowflake path (upload, COPY, reconciliation, dbt) as one command instead of the runbook's manual steps.
+- Protect `main` with required CI checks so pull requests cannot merge red.
 - Handle a late-arriving *older* snapshot in SCD2 without a full refresh (today the reconciliation test flags it until `--full-refresh` runs).
 - Detect schema drift in Snowflake landing tables (they are templated from the oldest snapshot).
 
@@ -303,7 +315,7 @@ ingestion/          contracts/*.yml, contract.py (rules), bronze.py (ingestion),
 transform/          dbt project: models/silver, snapshots, models/gold/{core,marts}, macros, tests
 pipeline.py         orchestration: bronze -> silver -> SCD2 replay -> gold -> tests
 dashboard/          app.py (Streamlit), queries.py (gold queries), backends.py (DuckDB / Snowflake)
-deploy/snowflake/   cost guardrails, setup, bronze load renderer, reconciliation, teardown (not yet run)
+deploy/snowflake/   cost guardrails, setup, bronze load renderer, reconciliation, teardown (deployed 2026-11-20)
 benchmarks/         run.py -> docs/benchmarks.md
 docs/               benchmarks.md, ingestion.md, snowflake.md
 tests/              pytest suite and synthetic data generator

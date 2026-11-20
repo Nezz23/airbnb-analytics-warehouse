@@ -1,4 +1,4 @@
--- Cost guardrails. Run FIRST, as ACCOUNTADMIN (resource monitors need it). Not yet executed.
+-- Cost guardrails. Run FIRST, as ACCOUNTADMIN (resource monitors need it). Executed 2026-11-20.
 --
 -- A resource monitor is the only hard spend cap Snowflake offers: at 100% of the quota it suspends
 -- the warehouse, and queries cannot resume it until the next interval or a quota raise.
