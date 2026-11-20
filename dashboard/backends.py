@@ -52,7 +52,7 @@ def snowflake_settings() -> dict:
         "user": os.environ["SNOWFLAKE_USER"],
         "authenticator": "SNOWFLAKE_JWT",
         "private_key_file": os.environ["SNOWFLAKE_PRIVATE_KEY_PATH"],
-        "role": os.environ.get("SNOWFLAKE_ROLE", "REPORTER"),
+        "role": os.environ.get("SNOWFLAKE_ROLE", "AIRBNB_REPORTER"),
         "warehouse": os.environ.get("SNOWFLAKE_WAREHOUSE", "TRANSFORMING"),
         "database": os.environ.get("SNOWFLAKE_DATABASE", "AIRBNB"),
         "client_session_keep_alive": False,

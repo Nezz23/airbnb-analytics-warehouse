@@ -9,13 +9,12 @@ priced as (
     select
         f.listing_id, f.snapshot_date, s.snapshot_idx, f.borough, f.neighbourhood, f.room_type,
         f.ll18_status, f.price_usd, f.quote_nights,
-        lag(f.price_usd)    over w as previous_price_usd,
-        lag(f.quote_nights) over w as previous_quote_nights,
-        lag(s.snapshot_idx) over w as previous_idx
+        lag(f.price_usd) over (partition by f.listing_id order by s.snapshot_idx) as previous_price_usd,
+        lag(f.quote_nights) over (partition by f.listing_id order by s.snapshot_idx) as previous_quote_nights,
+        lag(s.snapshot_idx) over (partition by f.listing_id order by s.snapshot_idx) as previous_idx
     from {{ ref('fct_listing_snapshot') }} as f
     inner join snapshots as s using (snapshot_date)
-    where f.price_usd is not null
-    window w as (partition by f.listing_id order by s.snapshot_idx)
+    where f.price_usd is not null  -- window spelled out per column: Snowflake has no WINDOW clause
 )
 
 select

@@ -1,6 +1,6 @@
-# Snowflake deployment runbook (prepared, not yet executed)
+# Snowflake deployment runbook (deployed and validated 2026-11-20)
 
-Nothing here has been run against a Snowflake account. Every step that creates objects or uses
+Deployed to a Snowflake trial account on 2026-11-20; results are in the README (section 9). Every step that creates objects or uses
 compute is listed explicitly so it can be approved before any spend. Locally, the same dbt project
 runs on DuckDB, and CI checks Snowflake readiness offline (see [What is verified](#what-is-verified-offline)).
 
@@ -44,7 +44,7 @@ and key files. Key-pair authentication (no passwords):
 | `SNOWFLAKE_ACCOUNT` | dbt, dashboard | required |
 | `SNOWFLAKE_USER` | dbt, dashboard | required |
 | `SNOWFLAKE_PRIVATE_KEY_PATH` | dbt, dashboard | required (path to a `.p8` outside the repo) |
-| `SNOWFLAKE_ROLE` | dbt: `TRANSFORMER`; dashboard: `REPORTER` | per tool |
+| `SNOWFLAKE_ROLE` | dbt: `AIRBNB_TRANSFORMER`; dashboard: `AIRBNB_REPORTER` | per tool |
 | `SNOWFLAKE_WAREHOUSE` | both | `TRANSFORMING` |
 | `SNOWFLAKE_DATABASE` | both | `AIRBNB` |
 | `AIRBNB_WAREHOUSE_BACKEND=snowflake` | dashboard | `duckdb` |
@@ -66,14 +66,14 @@ and key files. Key-pair authentication (no passwords):
    (every manifest entry's row count equals what landed).
 6. **Transform and test**:
    ```bash
-   DBT_TARGET=snowflake SNOWFLAKE_ROLE=TRANSFORMER uv run python pipeline.py --skip-bronze
+   DBT_TARGET=snowflake SNOWFLAKE_ROLE=AIRBNB_TRANSFORMER uv run python pipeline.py --skip-bronze
    ```
    This runs exactly what runs locally: silver, SCD2 replay one snapshot at a time, gold, then every
    dbt data test and unit test, including `assert_scd2_reconciles_with_silver` and
    `assert_quarantined_snapshots_excluded`. Results go to `data/quality/test_history.jsonl`.
 7. **Dashboard**:
    ```bash
-   AIRBNB_WAREHOUSE_BACKEND=snowflake SNOWFLAKE_ROLE=REPORTER uv run streamlit run dashboard/app.py
+   AIRBNB_WAREHOUSE_BACKEND=snowflake SNOWFLAKE_ROLE=AIRBNB_REPORTER uv run streamlit run dashboard/app.py
    ```
 8. **Freshness**: `dbt source freshness --target snowflake` warns after 40 days without a new manifest entry.
 
@@ -95,6 +95,7 @@ and key files. Key-pair authentication (no passwords):
 | `stg_bronze_manifest` selected a bare `rows` column | `ROWS` is a reserved word: syntax error | `adapter.quote('rows')`, and the manifest view exposes `"rows"` |
 | Bronze has `_snapshot_date`; locally `snapshot_date` comes from the hive path | dbt references `snapshot_date` | `BRONZE` views add `snapshot_date` |
 | `pipeline.py` always ran local DuckDB bronze ingestion | Pointless for a Snowflake target, and easy to confuse with a load | `--skip-bronze`; a guard refuses `DBT_TARGET=snowflake` without it |
+| Named `WINDOW w as (...)` clause in `mart_price_changes` (found on the first real build) | Not supported: the model failed to compile | Window written inline per column; the compatibility test now rejects named windows |
 
 Already portable before the audit: `parse_money` and `array_length` dispatch per adapter, date math
 uses `dbt.datediff`, the SCD2 replay timestamp override exists for `snowflake__snapshot_get_time`, and
@@ -116,6 +117,9 @@ Not verifiable without an account: `dbt compile`/`build` (they introspect the ta
 on real files, and query performance. Step 5 and the dbt tests in step 6 cover these on first run.
 
 ## Known limitations
+
+- **Slow upload links:** PUT can stall on a slow connection (seen at ~1 Mbps upload). Rerunning is safe: each
+  snapshot has its own stage prefix and is reloaded with delete plus forced COPY.
 
 - **Schema drift:** the landing tables are templated from the oldest snapshot. A column that Inside
   Airbnb adds later is ignored by `match_by_column_name` until you `alter table … add column`. No drift

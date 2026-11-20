@@ -1,4 +1,4 @@
--- Post-load reconciliation, run after 02_load_bronze.sql and before dbt. Not yet executed.
+-- Post-load reconciliation, run after 02_load_bronze.sql and before dbt. Executed 2026-11-20.
 -- Every file lands in bronze (quarantined ones too), so for every manifest entry the loaded row
 -- count must equal the count bronze ingestion measured locally. Any row returned is a failed load.
 

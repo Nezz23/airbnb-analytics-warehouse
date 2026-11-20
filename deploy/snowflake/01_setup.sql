@@ -1,4 +1,4 @@
--- One-time setup: warehouse, database, schemas, roles. Not yet executed.
+-- One-time setup: warehouse, database, schemas, roles. Executed 2026-11-20.
 -- Run as a role with CREATE WAREHOUSE / DATABASE / ROLE (SYSADMIN + SECURITYADMIN, or ACCOUNTADMIN).
 -- Every statement is idempotent (`if not exists`), so re-running is safe.
 
@@ -23,32 +23,32 @@ create schema if not exists airbnb.silver;
 create schema if not exists airbnb.gold;
 create schema if not exists airbnb.analytics;  -- profiles.yml default schema (dbt test audit, etc.)
 
--- Roles: TRANSFORMER loads bronze and runs dbt; REPORTER is read-only on gold for the dashboard.
-create role if not exists transformer;
-create role if not exists reporter;
-grant role transformer to role sysadmin;
-grant role reporter to role sysadmin;
+-- Roles: AIRBNB_TRANSFORMER loads bronze and runs dbt; AIRBNB_REPORTER is read-only on gold for the dashboard.
+create role if not exists airbnb_transformer;
+create role if not exists airbnb_reporter;
+grant role airbnb_transformer to role sysadmin;
+grant role airbnb_reporter to role sysadmin;
 
-grant usage on warehouse transforming to role transformer;
-grant usage on warehouse transforming to role reporter;
-grant usage, create schema on database airbnb to role transformer;
-grant all on all schemas in database airbnb to role transformer;
-grant all on future schemas in database airbnb to role transformer;
+grant usage on warehouse transforming to role airbnb_transformer;
+grant usage on warehouse transforming to role airbnb_reporter;
+grant usage, create schema on database airbnb to role airbnb_transformer;
+grant all on all schemas in database airbnb to role airbnb_transformer;
+grant all on future schemas in database airbnb to role airbnb_transformer;
 
-grant usage on database airbnb to role reporter;
-grant usage on schema airbnb.gold to role reporter;
-grant usage on schema airbnb.silver to role reporter;          -- dashboard map joins silver.stg_listings
-grant select on future tables in schema airbnb.gold to role reporter;
-grant select on future views in schema airbnb.gold to role reporter;
-grant select on future tables in schema airbnb.silver to role reporter;
+grant usage on database airbnb to role airbnb_reporter;
+grant usage on schema airbnb.gold to role airbnb_reporter;
+grant usage on schema airbnb.silver to role airbnb_reporter;          -- dashboard map joins silver.stg_listings
+grant select on future tables in schema airbnb.gold to role airbnb_reporter;
+grant select on future views in schema airbnb.gold to role airbnb_reporter;
+grant select on future tables in schema airbnb.silver to role airbnb_reporter;
 
 -- Service users authenticate with key pairs (no passwords). Generate locally:
 --   openssl genrsa 2048 | openssl pkcs8 -topk8 -inform PEM -out ~/.snowflake/airbnb_rsa.p8 -nocrypt
 --   openssl rsa -in ~/.snowflake/airbnb_rsa.p8 -pubout -out ~/.snowflake/airbnb_rsa.pub
 -- Keep the .p8 outside this repository. Paste the public key body (no header/footer lines) below.
--- create user if not exists airbnb_dbt type = service default_role = transformer
+-- create user if not exists airbnb_dbt type = service default_role = airbnb_transformer
 --   default_warehouse = transforming rsa_public_key = '<public key>';
--- grant role transformer to user airbnb_dbt;
--- create user if not exists airbnb_dashboard type = service default_role = reporter
+-- grant role airbnb_transformer to user airbnb_dbt;
+-- create user if not exists airbnb_dashboard type = service default_role = airbnb_reporter
 --   default_warehouse = transforming rsa_public_key = '<public key>';
--- grant role reporter to user airbnb_dashboard;
+-- grant role airbnb_reporter to user airbnb_dashboard;

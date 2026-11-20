@@ -28,6 +28,7 @@ DUCKDB_ONLY = {
     r"\bregexp_replace\(": "flags differ by engine: use the parse_money-style dispatched macro",
     r"\blen\(": "DuckDB length function (use the array_length macro)",
     r"\b(arg_max|arg_min)\(": "DuckDB aggregate (Snowflake: max_by / min_by)",
+    r"\bwindow\s+\w+\s+as\s*\(": "named WINDOW clause (not supported on Snowflake; inline the over (...))",
 }
 # Snowflake reserved words that are plausible column names. Flag them where used as an identifier.
 RESERVED_AS_IDENTIFIER = re.compile(
