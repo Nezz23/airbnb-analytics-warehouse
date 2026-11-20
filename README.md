@@ -204,7 +204,7 @@ Findings from the 2026-11-01 snapshot, verified against the warehouse:
 
 | Check | Result |
 |---|---|
-| `uv run pytest -q` (Python) | **88 passed**: contract logic; an end-to-end pipeline run on synthetic snapshots (quarantine, SCD2 change/close/reopen, LL18 transitions, idempotent second run); dashboard smoke test; DuckDB/Snowflake backend selection; offline Snowflake compatibility; the downloader against a local HTTP server with injected faults |
+| `uv run pytest -q` (Python) | **87 passed, 1 skipped** (the Snowflake compatibility check needs `uv sync --extra snowflake`; with it, 88 pass): contract logic; an end-to-end pipeline run on synthetic snapshots (quarantine, SCD2 change/close/reopen, LL18 transitions, idempotent second run); dashboard smoke test; DuckDB/Snowflake backend selection; offline Snowflake compatibility; the downloader against a local HTTP server with injected faults |
 | `dbt build` on the real 10-snapshot warehouse | **65 passed, 1 warning, 0 errors** |
 | `ruff check` and `ruff format --check` | Clean |
 | Dashboard on real data | Renders every tab without exceptions |
@@ -212,9 +212,10 @@ Findings from the 2026-11-01 snapshot, verified against the warehouse:
 The single warning is a known, intentional `warn`-severity test: 30 listings have a null `minimum_nights`.
 It is a row-level gap, not a reason to reject the snapshot.
 
-**CI status:** a GitHub Actions workflow is defined in `.github/workflows/ci.yml` (install, lint, pytest,
-dbt docs artifact), but it is **not currently running** on this repository: GitHub has not registered the
-workflow. All results above come from local runs on the merged code. The project does not claim active CI/CD.
+**CI status:** GitHub Actions (`.github/workflows/ci.yml`: install, lint, pytest, dbt docs artifact) runs on
+every push to `main` and on pull requests. It was registered when the workflow first reached `main`
+(2026-11-19), so the first six pull requests were merged on local results; every push to `main` since has run
+CI, and the latest run passed all steps. There is no deployment (CD) step: Snowflake is not deployed.
 
 ## 8. Local setup
 
@@ -287,12 +288,12 @@ in a single stage prefix, case-sensitive inferred column names, and a column nam
 | Automated snapshot download | Complete; run manually (scheduling documented, not installed) |
 | Dashboard (DuckDB backend) | Complete |
 | Snowflake: dbt target, setup, load and reconciliation scripts, dashboard backend | Prepared and checked offline; **not deployed** |
-| GitHub Actions CI | Workflow defined; **not running** |
+| GitHub Actions CI | Running on pushes to `main` (latest: passing); pull-request runs apply from the next PR on |
 
 ## 12. Future improvements
 
 - Deploy to a Snowflake trial account behind the resource monitor, then run the reconciliation and full dbt test suite there.
-- Get CI running on pull requests and protect `main` with required checks.
+- Protect `main` with required CI checks so pull requests cannot merge red.
 - Handle a late-arriving *older* snapshot in SCD2 without a full refresh (today the reconciliation test flags it until `--full-refresh` runs).
 - Detect schema drift in Snowflake landing tables (they are templated from the oldest snapshot).
 
